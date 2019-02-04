@@ -110,41 +110,62 @@ class LocaleSyncService extends BaseApplicationComponent
 		}
 	}
 
-	public function updateElement(&$element, $field)
-	{
-		$fieldType = null;
-		$fieldHandle = null;
-		$translatable = false;
-		$elementsField = false;
+    public function updateElement(&$element, $field)
+    {
+        $fieldHandle = null;
+        $translatable = false;
+        $elementsField = false;
+        $superTableFieldType = false;
 
-		if ($field instanceof Fieldmodel) {
-			$fieldHandle = $field->handle;
-			$translatable = $field->translatable;
-			$fieldType = $field->fieldType;
-			$elementsField = $field->fieldType instanceof BaseElementFieldType;
-		} elseif ($field === 'title') {
-			$fieldHandle = $field;
-			$translatable = true;
-		}
+        if ($field instanceof Fieldmodel) {
+            $fieldHandle = $field->handle;
+            $translatable = $field->translatable;
+            $elementsField = $field->fieldType instanceof BaseElementFieldType;
+            $superTableFieldType = $field->fieldType instanceof SuperTableFieldType;
+        } elseif ($field === 'title') {
+            $fieldHandle = $field;
+            $translatable = true;
+        }
 
-		$matches = $this->_elementBeforeSave->content->$fieldHandle === $element->content->$fieldHandle;
-		$overwrite = (isset($this->_elementSettings['overwrite']) && $this->_elementSettings['overwrite']);
+        $matches = $this->_elementBeforeSave->content->$fieldHandle === $element->content->$fieldHandle;
+        $overwrite = (isset($this->_elementSettings['overwrite']) && $this->_elementSettings['overwrite']);
 
-		if ($elementsField) {
-			$matches = $this->_elementBeforeSave->$fieldHandle->ids() === $element->$fieldHandle->ids();
-		}
+        if ($elementsField) {
+            $matches = $this->_elementBeforeSave->$fieldHandle->ids() === $element->$fieldHandle->ids();
+        }
 
-		if ($translatable && ($overwrite || $matches)) {
+        if ($translatable && ($overwrite || $matches)) {
 
-			if ($elementsField) {
-				craft()->relations->saveRelations($field, $element, $this->_element->content->$fieldHandle);
-			} else {
-				$element->content->$fieldHandle = $this->_element->content->$fieldHandle;
-			}
+            if ($elementsField) {
+                craft()->relations->saveRelations($field, $element, $this->_element->content->$fieldHandle);
+            }
 
-			return true;
-		}
+            if ($superTableFieldType && $this->canProcessSuperTable()) {
+                //since this is passed by reference, we just need to run this and not worry about return.
+                $element->getFieldValue($fieldHandle);
 
-		return false;
-	}
+                $fieldValue = $this->_element->getFieldValue($fieldHandle);
+
+                $superTableData = craft()->bcCore_superTable->buildSuperTableDataFromField($fieldHandle, $fieldValue);
+
+                $field->fieldType->element->setContentFromPost($superTableData);
+
+                craft()->superTable->saveField($field->fieldType);
+            } else {
+                $element->content->$fieldHandle = $this->_element->content->$fieldHandle;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    private function canProcessSuperTable()
+    {
+        $bccore = craft()->plugins->getPlugin('bccore');
+        $superTable = craft()->plugins->getPlugin('supertable');
+
+        return (!empty($bccore) && $bccore->isEnabled) && (!empty($superTable) && $superTable->isEnabled);
+    }
 }
